@@ -7,6 +7,15 @@ type ParticipantStats = {
   messages: number;
   words: number;
   attachments: number;
+  responseCount: number;
+  totalResponseMs: number;
+  averageResponseMs: number | null;
+};
+
+type TimestampedParticipantMessage = ChatMessage & {
+  sender: string;
+  timestamp: Date;
+  isSystem: false;
 };
 
 type ChatStats = {
@@ -26,6 +35,8 @@ const filters: Array<{ id: MessageFilter; label: string }> = [
   { id: "images", label: "Images" },
   { id: "media", label: "Media" },
 ];
+
+const maxResponseGapMs = 16 * 60 * 60 * 1000;
 
 function App() {
   const [chat, setChat] = useState<ParsedChat | null>(null);
@@ -115,12 +126,14 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <section className="control-panel" aria-label="Import controls">
-        <div>
-          <p className="eyebrow">Local-only viewer</p>
-          <h1>WhatsApp Backup Interpreter</h1>
-        </div>
+    <>
+      <MobileDisabled />
+      <main className="app-shell">
+        <section className="control-panel" aria-label="Import controls">
+          <div>
+            <p className="eyebrow">Local-only viewer</p>
+            <h1>WhatsApp Backup Interpreter</h1>
+          </div>
 
         <label className="file-drop">
           <input type="file" accept=".zip,application/zip" onChange={handleFileChange} />
@@ -249,6 +262,25 @@ function App() {
       <aside className="details-panel" aria-label="Detailed chat statistics">
         <DetailedStats chat={chat} stats={chatStats} visibleCount={visibleMessages.length} />
       </aside>
+      </main>
+    </>
+  );
+}
+
+function MobileDisabled() {
+  return (
+    <main className="mobile-disabled" aria-label="Mobile disabled notice">
+      <div className="mobile-disabled-card">
+        <div className="mobile-disabled-mark" aria-hidden="true">
+          WA
+        </div>
+        <p className="eyebrow">Desktop only</p>
+        <h1>Disabled on mobile due to performance problems</h1>
+        <p>
+          WhatsApp ZIP exports can contain thousands of messages and media files. Open this page on a laptop or desktop
+          browser for the full local viewer.
+        </p>
+      </div>
     </main>
   );
 }
@@ -322,11 +354,23 @@ function DetailedStats({
             </div>
             <StatMeter label="Messages" value={stat.messages} total={stats.totalParticipantMessages} />
             <StatMeter label="Words" value={stat.words} total={stats.totalParticipantWords} />
+            <ResponseMetric stat={stat} />
           </div>
         ))}
       </div>
       </section>
     </>
+  );
+}
+
+function ResponseMetric({ stat }: { stat: ParticipantStats }) {
+  return (
+    <div className="stat-counter">
+      <span>Avg response time</span>
+      <strong>
+        {formatDuration(stat.averageResponseMs)} · {stat.responseCount.toLocaleString()} replies
+      </strong>
+    </div>
   );
 }
 
@@ -535,6 +579,9 @@ function getParticipantStats(messages: ChatMessage[]): ParticipantStats[] {
         messages: 0,
         words: 0,
         attachments: 0,
+        responseCount: 0,
+        totalResponseMs: 0,
+        averageResponseMs: null,
       } satisfies ParticipantStats);
 
     existing.messages += 1;
@@ -543,7 +590,41 @@ function getParticipantStats(messages: ChatMessage[]): ParticipantStats[] {
     byParticipant.set(message.sender, existing);
   }
 
+  addResponseTimes(messages, byParticipant);
+
   return Array.from(byParticipant.values()).sort((a, b) => b.messages - a.messages || b.words - a.words);
+}
+
+function addResponseTimes(messages: ChatMessage[], byParticipant: Map<string, ParticipantStats>) {
+  const responseWindowMessages = getResponseWindowMessages(messages);
+  let lastParticipantMessage: ChatMessage | null = null;
+
+  for (const message of responseWindowMessages) {
+    if (
+      lastParticipantMessage?.sender &&
+      lastParticipantMessage.timestamp &&
+      lastParticipantMessage.sender !== message.sender
+    ) {
+      const responseMs = message.timestamp.getTime() - lastParticipantMessage.timestamp.getTime();
+      const stats = byParticipant.get(message.sender);
+
+      if (stats && responseMs >= 0 && responseMs <= maxResponseGapMs) {
+        stats.responseCount += 1;
+        stats.totalResponseMs += responseMs;
+        stats.averageResponseMs = Math.round(stats.totalResponseMs / stats.responseCount);
+      }
+    }
+
+    lastParticipantMessage = message;
+  }
+}
+
+function getResponseWindowMessages(messages: ChatMessage[]): TimestampedParticipantMessage[] {
+  return messages
+    .filter((message): message is TimestampedParticipantMessage =>
+      Boolean(message.sender && !message.isSystem && message.timestamp),
+    )
+    .slice(-1000);
 }
 
 function countWords(text: string): number {
@@ -616,6 +697,23 @@ function formatBytes(bytes: number): string {
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return "Not enough replies";
+
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  if (seconds > 0) return `${seconds}s`;
+  return `${minutes}m`;
 }
 
 export default App;

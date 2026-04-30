@@ -274,6 +274,26 @@ h1 {
   color: #263a34;
 }
 
+.stat-counter {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #63716c;
+  font-size: 0.78rem;
+}
+
+.stat-counter strong {
+  color: #263a34;
+}
+
+.stat-counter span,
+.stat-counter strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .meter-track {
   height: 7px;
   overflow: hidden;
