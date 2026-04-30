@@ -221,7 +221,6 @@ function App() {
           <div className="chat-header">
             <button className="back-button" type="button" aria-label="Back">
               <span>‹</span>
-              <small>Chats</small>
             </button>
             <div className="contact-stack">
               <Avatar
@@ -246,14 +245,6 @@ function App() {
                 <p>The rendered chat will appear here in a mobile WhatsApp-style view.</p>
               </div>
             )}
-          </div>
-          <div className="message-composer" aria-hidden="true">
-            <button type="button">+</button>
-            <div className="composer-field">
-              <span>Message</span>
-            </div>
-            <button type="button" className="camera-button" />
-            <button type="button" className="mic-button" />
           </div>
         </div>
       </section>
