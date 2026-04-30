@@ -151,12 +151,6 @@ function App() {
               </select>
             </label>
 
-            <label className="profile-picker">
-              <span>Profile picture</span>
-              <input type="file" accept="image/*" onChange={handleProfilePictureChange} />
-              <strong>{profilePictureUrl ? "Change picture" : "Choose local image"}</strong>
-            </label>
-
             <label className="field">
               <span>Search</span>
               <input
@@ -228,6 +222,7 @@ function App() {
               <Avatar
                 imageUrl={profilePictureUrl}
                 fallback={getInitials(chat?.participants.filter((participant) => participant !== myName)[0])}
+                onChange={handleProfilePictureChange}
               />
               <div className="chat-title">
                 <strong>{getChatTitle(chat, myName)}</strong>
@@ -353,11 +348,20 @@ function StatMeter({ label, value, total }: { label: string; value: number; tota
   );
 }
 
-function Avatar({ imageUrl, fallback }: { imageUrl: string; fallback: string }) {
+function Avatar({
+  imageUrl,
+  fallback,
+  onChange,
+}: {
+  imageUrl: string;
+  fallback: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
   return (
-    <div className="avatar">
+    <label className="avatar" title="Change profile picture">
+      <input type="file" accept="image/*" onChange={onChange} />
       {imageUrl ? <img src={imageUrl} alt="Chat profile" /> : <span>{fallback}</span>}
-    </div>
+    </label>
   );
 }
 
