@@ -210,6 +210,9 @@ function App() {
             </span>
           </div>
         )}
+        <a className="issue-link" href="mailto:contact.marfeyx@gmail.com">
+          Report issues to contact.marfeyx@gmail.com
+        </a>
       </section>
 
       <section className="phone-stage" aria-label="WhatsApp-style preview">

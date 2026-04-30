@@ -330,6 +330,28 @@ h1 {
   width: fit-content;
 }
 
+.issue-link {
+  margin-top: auto;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid rgba(31, 48, 42, 0.14);
+  border-radius: 8px;
+  color: #25352f;
+  background: #ffffff;
+  font-size: 0.86rem;
+  font-weight: 750;
+  text-align: center;
+  text-decoration: none;
+}
+
+.issue-link:hover {
+  border-color: #0a8f68;
+  color: #0a664d;
+}
+
 .privacy-note {
   display: grid;
   gap: 8px;
@@ -483,7 +505,7 @@ h1 {
 .back-button {
   display: flex;
   align-items: center;
-  gap: 1px;
+  justify-content: flex-start;
   width: 72px;
   height: 38px;
   border: 0;
@@ -496,11 +518,6 @@ h1 {
   font-size: 2.05rem;
   line-height: 1;
   transform: translateY(-1px);
-}
-
-.back-button small {
-  font-size: 0.98rem;
-  font-weight: 500;
 }
 
 .contact-stack {
