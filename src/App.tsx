@@ -25,8 +25,6 @@ const filters: Array<{ id: MessageFilter; label: string }> = [
   { id: "text", label: "Text" },
   { id: "images", label: "Images" },
   { id: "media", label: "Media" },
-  { id: "documents", label: "Docs" },
-  { id: "system", label: "System" },
 ];
 
 function App() {
@@ -198,9 +196,6 @@ function App() {
               ))}
             </div>
 
-            <button className="secondary-action" type="button" onClick={clearChat}>
-              Clear session
-            </button>
           </>
         ) : (
           <div className="privacy-note">
@@ -210,8 +205,12 @@ function App() {
             </span>
           </div>
         )}
-        <a className="issue-link" href="mailto:contact.marfeyx@gmail.com">
-          Report issues to contact.marfeyx@gmail.com
+        <a
+          className="issue-link"
+          href="mailto:contact.marfeyx@gmail.com?subject=WhatsApp%20Backup%20Interpreter%20Issue"
+        >
+          <span>Report issues</span>
+          <strong>contact.marfeyx@gmail.com</strong>
         </a>
       </section>
 

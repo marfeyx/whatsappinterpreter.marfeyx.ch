@@ -332,24 +332,39 @@ h1 {
 
 .issue-link {
   margin-top: auto;
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 12px;
-  border: 1px solid rgba(31, 48, 42, 0.14);
+  min-height: 58px;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(10, 143, 104, 0.22);
   border-radius: 8px;
-  color: #25352f;
-  background: #ffffff;
-  font-size: 0.86rem;
-  font-weight: 750;
-  text-align: center;
+  color: #134536;
+  background:
+    linear-gradient(135deg, rgba(10, 143, 104, 0.12), rgba(255, 255, 255, 0.96)),
+    #ffffff;
+  box-shadow: 0 8px 20px rgba(31, 48, 42, 0.08);
   text-decoration: none;
+}
+
+.issue-link span {
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.issue-link strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #0a664d;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .issue-link:hover {
   border-color: #0a8f68;
-  color: #0a664d;
+  box-shadow: 0 10px 24px rgba(31, 48, 42, 0.12);
 }
 
 .privacy-note {
