@@ -1,110 +1,205 @@
 # WhatsApp Backup Interpreter
 
-A local-only web app for viewing WhatsApp chat exports in a realistic WhatsApp-style mobile UI.
+A local-only web app for viewing WhatsApp chat export backups in a realistic iOS WhatsApp-style chat UI.
 
-The app runs on your own PC. Chat text and media are not uploaded anywhere. The selected ZIP file is read by your browser locally, and imported chat data is kept in memory only.
+The app is designed for privacy: your backup is not uploaded anywhere, there is no backend server, and imported chat data is kept in browser memory only.
 
-## What It Does
+## Features
 
-- Opens WhatsApp "Export chat" ZIP files.
-- Parses the exported chat `.txt` file.
-- Reconnects included media files to matching chat messages.
-- Shows messages in a WhatsApp-style mobile chat view.
-- Displays images, video, audio, and document attachments.
-- Lets you choose which participant is "you" so messages align correctly.
-- Supports search and filters for text, images, media, documents, and system messages.
+- Import standard WhatsApp **Export chat** ZIP files.
+- Parse the exported chat `.txt` file locally in the browser.
+- Reconnect exported media files to their matching chat messages.
+- Render the conversation in an iOS WhatsApp-style phone preview.
+- Display:
+  - text messages
+  - image messages
+  - transparent stickers
+  - videos
+  - voice memos
+  - audio files
+  - document attachments
+- Hide common WhatsApp-generated boilerplate notices, including end-to-end encryption messages.
+- Clean up exported attachment placeholder text such as `<attached: >` and `<Anhang: >`.
+- Choose which participant is **you** so incoming and outgoing bubbles align correctly.
+- Change the displayed profile picture by clicking the avatar in the chat header.
+- Search by message text, sender, or file name.
+- Filter by:
+  - all messages
+  - text
+  - images
+  - media
+- Search for messages from a specific date.
+- Show general chat info on the left.
+- Show detailed stats on the right:
+  - total messages
+  - participant count
+  - file count
+  - total words
+  - average words per message
+  - image and video counts
+  - most messages
+  - most words
+  - per-participant message and word percentages
+- Report issues through a local `mailto:` link.
+
+## Privacy And Security
+
+- Chat backups are processed locally on your own computer.
+- The selected ZIP file is read by your browser.
+- No chat content is sent to a server.
+- No media is uploaded.
+- The app does not save imported chat data to browser storage.
+- Refreshing or closing the page clears the imported chat from memory.
+- Media previews use temporary local browser object URLs.
+
+After installing dependencies, the app itself can be used without internet access.
+
+## Supported Backups
+
+Supported:
+
+- WhatsApp **Export chat** ZIP files
+- Exports with or without media
+- Common WhatsApp media files such as images, stickers, videos, audio, voice notes, and documents
+
+Not supported:
+
+- Encrypted WhatsApp database backups
+- Android `msgstore.db.crypt*` database files
+- iCloud WhatsApp backups
 
 ## Requirements
 
 Install these first:
 
 - [Node.js](https://nodejs.org/) version 20 or newer
-- npm, which is included with Node.js
+- npm, included with Node.js
 
-To check whether they are installed, run:
+Check your installation:
 
 ```powershell
 node --version
 npm --version
 ```
 
-## How To Run It
+## Local Development Tutorial
 
-Open a terminal in this project folder and run:
+1. Clone or download this project.
+
+2. Open a terminal in the project folder.
+
+3. Install dependencies:
 
 ```powershell
 npm install
+```
+
+4. Start the local development server:
+
+```powershell
 npm run dev
 ```
 
-Then open the local address shown in the terminal. By default it is usually:
+5. Open the local URL shown in the terminal. By default it is:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-This address is local to your own computer.
+This URL runs on your own computer.
 
-## How To Export A WhatsApp Chat
+## Production Build Tutorial
 
-On your phone:
-
-1. Open the WhatsApp chat.
-2. Open the chat info or menu.
-3. Choose **Export chat**.
-4. Choose **Include media** if you want images, audio, videos, and documents to appear.
-5. Save or send the exported `.zip` file to your PC.
-
-In the app:
-
-1. Click **Choose WhatsApp export ZIP**.
-2. Select the exported ZIP file.
-3. Choose your own name in the **My name** dropdown.
-4. Browse, search, or filter the rendered chat.
-
-## Privacy And Security
-
-- The app does not upload your backup.
-- There is no backend server that receives your chat.
-- ZIP parsing happens inside your browser.
-- Media previews are created from local browser object URLs.
-- Imported chat data is not saved to browser storage.
-- Refreshing or closing the page clears the imported chat from memory.
-
-If you want to be extra strict, you can disconnect from the internet after running `npm install`. The app itself does not need internet access to parse and display a chat export.
-
-## Build A Production Version
-
-To create a production build:
+Create a production build:
 
 ```powershell
 npm run build
 ```
 
-The built files are created in the `dist` folder.
+The built files are created in:
 
-To preview the production build locally:
+```text
+dist/
+```
+
+Preview the production build locally:
 
 ```powershell
 npm run preview
 ```
 
-## Supported Input
+The preview command will print a local URL in the terminal.
 
-The first version targets standard WhatsApp chat export ZIP files. It does not read encrypted WhatsApp database backups from Android or iCloud.
+## How To Export A WhatsApp Chat
 
-Best results come from exports that include media, because WhatsApp places the chat text and referenced media files together in the ZIP.
+On your phone:
+
+1. Open WhatsApp.
+2. Open the chat you want to export.
+3. Open the chat info or menu.
+4. Select **Export chat**.
+5. Choose **Include media** if you want images, stickers, videos, voice memos, and documents to appear.
+6. Save or transfer the exported `.zip` file to your PC.
+
+In the app:
+
+1. Click **Choose WhatsApp export ZIP**.
+2. Select the exported ZIP file.
+3. Choose your own name from the **My name** dropdown.
+4. Click the avatar in the chat header if you want to set a profile picture.
+5. Use search, date search, or filters to inspect the chat.
+
+## GitHub Safety
+
+The repository includes `.gitignore` rules for common private data:
+
+- WhatsApp export ZIPs
+- exported `.txt` chat files
+- images, stickers, videos, audio, voice notes, and documents
+- contact cards
+- `.env` files
+- log files
+- `node_modules/`
+- `dist/`
+
+Before pushing, you can verify what Git will include:
+
+```powershell
+git status --short
+```
+
+To check ignored files too:
+
+```powershell
+git status --short --ignored
+```
+
+Do not commit personal WhatsApp exports, private media, screenshots, or profile pictures.
 
 ## Troubleshooting
 
-If no chat appears, make sure the ZIP contains a `.txt` chat export file.
+If no chat appears, confirm the ZIP contains a WhatsApp export `.txt` file.
 
-If images or other media do not appear, make sure you exported the chat with media included.
+If media does not appear, export the chat again and choose **Include media**.
 
-If the app cannot start, confirm that Node.js is installed and then run:
+If the app does not start, reinstall dependencies:
 
 ```powershell
 npm install
 ```
 
-again inside the project folder.
+If the build fails, run:
+
+```powershell
+npm run build
+```
+
+and check the terminal error output.
+
+## Issue Reports
+
+Use the **Report issues** button in the app, or email:
+
+```text
+contact.marfeyx@gmail.com
+```
