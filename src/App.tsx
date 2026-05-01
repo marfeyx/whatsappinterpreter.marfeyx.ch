@@ -59,6 +59,7 @@ function App() {
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authDisplayName, setAuthDisplayName] = useState("");
   const [authError, setAuthError] = useState("");
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [accountActionError, setAccountActionError] = useState("");
@@ -81,7 +82,6 @@ function App() {
     : isAuthRateLimited
       ? `Too many login attempts. Try again in ${rateLimitSeconds} seconds.`
       : "";
-  const displayUsername = getDisplayUsername(authUser);
 
   useEffect(() => {
     return () => revokeAttachmentUrls(previousChat.current);
@@ -207,7 +207,8 @@ function App() {
     }
 
     const email = normalizeEmail(authEmail);
-    const validationError = validateCredentials(email, authPassword);
+    const displayName = authDisplayName.trim();
+    const validationError = validateCredentials(email, authPassword, authMode === "register" ? displayName : undefined);
     if (validationError) {
       setAuthError(validationError);
       return;
@@ -227,7 +228,7 @@ function App() {
         authMode === "login"
               email,
               password: authPassword,
-              options: { data: { username: getEmailUsername(email) } },
+              options: { data: { display_name: displayName, username: displayName } },
             });
 
       if (result.error) {
@@ -266,6 +267,7 @@ function App() {
     setAuthUser(null);
     setAuthEmail("");
     setAuthPassword("");
+    setAuthDisplayName("");
     setAuthMode("login");
     setAuthError("");
     setAccountActionError("");
@@ -308,15 +310,6 @@ function App() {
             <p className="eyebrow">Local-only viewer</p>
             <h1>WhatsApp Backup Interpreter</h1>
           </div>
-
-        <div className="auth-status">
-          <span>{authUser ? `Signed in as ${displayUsername}` : "Sign in required for upload"}</span>
-          {authUser ? (
-            <button type="button" onClick={handleLogout}>
-              Logout
-            </button>
-          ) : null}
-        </div>
 
         <input
           ref={fileInputRef}
@@ -408,7 +401,7 @@ function App() {
           </div>
 
           <div className="footer-account" aria-label="Account state">
-            <span>{authUser ? `Signed in as ${formatAccountLabel(authUser)}` : "Not signed in"}</span>
+            <span>{authUser ? `Signed in as ${getDisplayUsername(authUser)}` : "Not signed in"}</span>
             <div className="footer-account-actions">
               {authUser ? (
                 <>
@@ -421,7 +414,7 @@ function App() {
                   <a
                     className="footer-account-button danger"
                     href={`mailto:contact.marfeyx@marfeyx.ch?subject=Delete%20account%20request&body=${encodeURIComponent(
-                      `Please delete my WhatsApp Backup Interpreter account.\n\nAccount: ${formatAccountLabel(authUser)}`,
+                      `Please delete my WhatsApp Backup Interpreter account.\n\nAccount: ${authUser.email ?? getDisplayUsername(authUser)}`,
                     )}`}
                   >
                     Delete account request
@@ -493,6 +486,7 @@ function App() {
           mode={authMode}
           email={authEmail}
           password={authPassword}
+          displayName={authDisplayName}
           error={authError}
           isSubmitting={isAuthenticating}
           isLocked={isAuthBlocked}
@@ -504,6 +498,7 @@ function App() {
           }}
           onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
+          onDisplayNameChange={setAuthDisplayName}
           onClose={() => {
             if (!isAuthenticating) setIsAuthModalOpen(false);
           }}
@@ -518,6 +513,7 @@ function AuthModal({
   mode,
   email,
   password,
+  displayName,
   error,
   isSubmitting,
   isLocked,
@@ -526,12 +522,14 @@ function AuthModal({
   onModeChange,
   onEmailChange,
   onPasswordChange,
+  onDisplayNameChange,
   onClose,
   onSubmit,
 }: {
   mode: AuthMode;
   email: string;
   password: string;
+  displayName: string;
   error: string;
   isSubmitting: boolean;
   isLocked: boolean;
@@ -540,6 +538,7 @@ function AuthModal({
   onModeChange: (mode: AuthMode) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  onDisplayNameChange: (value: string) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -583,6 +582,21 @@ function AuthModal({
             placeholder="you@example.com"
           />
         </label>
+
+        {mode === "register" ? (
+          <label className="field">
+            <span>Display name</span>
+            <input
+              type="text"
+              autoComplete="name"
+              value={displayName}
+              onChange={(event) => onDisplayNameChange(event.target.value)}
+              placeholder="Your display name"
+              minLength={2}
+              maxLength={40}
+            />
+          </label>
+        ) : null}
 
         <label className="field">
           <span>Password</span>
@@ -1121,9 +1135,19 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function validateCredentials(email: string, password: string): string {
+function validateCredentials(email: string, password: string, displayName?: string): string {
   if (!/^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(email)) {
     return "Enter a valid email address.";
+  }
+
+  if (displayName !== undefined) {
+    if (!displayName) {
+      return "Enter a display name.";
+    }
+
+    if (!/^[\p{L}\p{N}][\p{L}\p{N} ._-]{1,39}$/u.test(displayName)) {
+      return "Use a display name with 2-40 letters, numbers, spaces, dots, underscores, or hyphens.";
+    }
   }
 
   if (password.length < 8) {
@@ -1140,17 +1164,17 @@ function getEmailUsername(email: string): string {
 function getDisplayUsername(user: User | null): string {
   if (!user) return "";
 
+  const metadataDisplayName = user.user_metadata?.display_name;
+  if (typeof metadataDisplayName === "string" && metadataDisplayName.trim()) {
+    return metadataDisplayName.trim();
+  }
+
   const metadataUsername = user.user_metadata?.username;
   if (typeof metadataUsername === "string" && metadataUsername.trim()) {
-    return metadataUsername;
+    return metadataUsername.trim();
   }
 
   return user.email?.split("@")[0] ?? "user";
-}
-
-function formatAccountLabel(user: User): string {
-  const username = getDisplayUsername(user);
-  return user.email ? `${username} (${user.email})` : username;
 }
 
 export default App;
