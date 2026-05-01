@@ -1,8 +1,7 @@
 # WhatsApp Backup Interpreter
 
-A local-only web app for viewing WhatsApp chat export backups in a realistic iOS WhatsApp-style chat UI.
+A login-gated, local-processing web app for viewing WhatsApp chat export backups in a realistic iOS WhatsApp-style chat UI.
 
-The app is designed for privacy: your backup is not uploaded anywhere, there is no backend server, and imported chat data is kept in browser memory only.
 
 ## Features
 
@@ -46,13 +45,20 @@ The app is designed for privacy: your backup is not uploaded anywhere, there is 
 
 - Chat backups are processed locally on your own computer.
 - The selected ZIP file is read by your browser.
-- No chat content is sent to a server.
+- Usernames are stored as cleartext account metadata.
 - No media is uploaded.
 - The app does not save imported chat data to browser storage.
 - Refreshing or closing the page clears the imported chat from memory.
 - Media previews use temporary local browser object URLs.
 
 After installing dependencies, the app itself can be used without internet access.
+
+
+
+
+- email/password auth enabled
+- email confirmation disabled
+- allowed site URL set to `https://whatsappinterpreter.marfeyx.ch`
 
 ## Supported Backups
 

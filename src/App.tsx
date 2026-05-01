@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { parseWhatsAppZip } from "./parser";
 import type { Attachment, ChatMessage, MessageFilter, ParsedChat } from "./types";
 
@@ -29,6 +29,8 @@ type ChatStats = {
   systemCount: number;
 };
 
+type AuthMode = "login" | "register";
+
 const filters: Array<{ id: MessageFilter; label: string }> = [
   { id: "all", label: "All" },
   { id: "text", label: "Text" },
@@ -37,6 +39,9 @@ const filters: Array<{ id: MessageFilter; label: string }> = [
 ];
 
 const maxResponseGapMs = 16 * 60 * 60 * 1000;
+const authEmailDomain = "whatsappinterpreter.local";
+const maxAuthAttempts = 5;
+const authLockoutMs = 60 * 1000;
 
 function App() {
   const [chat, setChat] = useState<ParsedChat | null>(null);
@@ -47,11 +52,54 @@ function App() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState("");
   const [profilePictureUrl, setProfilePictureUrl] = useState("");
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authFailures, setAuthFailures] = useState(0);
+  const [authLockedUntil, setAuthLockedUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousChat = useRef<ParsedChat | null>(null);
+
+  const isAuthLocked = Boolean(authLockedUntil && authLockedUntil > now);
+  const lockoutSeconds = authLockedUntil ? Math.max(0, Math.ceil((authLockedUntil - now) / 1000)) : 0;
+  const displayUsername = getDisplayUsername(authUser);
 
   useEffect(() => {
     return () => revokeAttachmentUrls(previousChat.current);
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+      if (!isMounted) return;
+      setAuthUser(data.user);
+      setIsAuthReady(true);
+    });
+
+    const {
+      data: { subscription },
+      setAuthUser(session?.user ?? null);
+      setIsAuthReady(true);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthLocked) return;
+
+    const intervalId = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(intervalId);
+  }, [isAuthLocked]);
 
   useEffect(() => {
     previousChat.current = chat;
@@ -82,6 +130,18 @@ function App() {
   const chatStats = useMemo(() => (chat ? getChatStats(chat) : null), [chat]);
 
   const importedAt = useMemo(() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), [chat]);
+
+  function handleUploadClick() {
+    setError("");
+
+    if (!authUser) {
+      setAuthError("");
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    fileInputRef.current?.click();
+  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -125,6 +185,62 @@ function App() {
     setProfilePictureUrl("");
   }
 
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isAuthLocked) {
+      setAuthError(`Too many failed attempts. Try again in ${lockoutSeconds} seconds.`);
+      return;
+    }
+
+    const normalizedUsername = normalizeUsername(authUsername);
+    const validationError = validateCredentials(normalizedUsername, authPassword);
+    if (validationError) {
+      setAuthError(validationError);
+      return;
+    }
+
+    setIsAuthenticating(true);
+    setAuthError("");
+
+    const email = usernameToAuthEmail(normalizedUsername);
+    const result =
+      authMode === "login"
+            email,
+            password: authPassword,
+            options: { data: { username: normalizedUsername } },
+          });
+
+    setIsAuthenticating(false);
+
+    if (result.error) {
+      registerAuthFailure();
+      setAuthError("The username or password was not accepted.");
+      return;
+    }
+
+    setAuthFailures(0);
+    setAuthLockedUntil(null);
+    setAuthPassword("");
+    setIsAuthModalOpen(false);
+    window.setTimeout(() => fileInputRef.current?.click(), 0);
+  }
+
+  async function handleLogout() {
+    setAuthUser(null);
+  }
+
+  function registerAuthFailure() {
+    const nextFailures = authFailures + 1;
+    setAuthFailures(nextFailures);
+
+    if (nextFailures >= maxAuthAttempts) {
+      setAuthLockedUntil(Date.now() + authLockoutMs);
+      setNow(Date.now());
+      setAuthFailures(0);
+    }
+  }
+
   return (
     <>
       <MobileDisabled />
@@ -135,13 +251,28 @@ function App() {
             <h1>WhatsApp Backup Interpreter</h1>
           </div>
 
-        <label className="file-drop">
-          <input type="file" accept=".zip,application/zip" onChange={handleFileChange} />
+        <div className="auth-status">
+          <span>{authUser ? `Signed in as ${displayUsername}` : "Sign in required for upload"}</span>
+          {authUser ? (
+            <button type="button" onClick={handleLogout}>
+              Logout
+            </button>
+          ) : null}
+        </div>
+
+        <input
+          ref={fileInputRef}
+          className="hidden-file-input"
+          type="file"
+          accept=".zip,application/zip"
+          onChange={handleFileChange}
+        />
+        <button className="file-drop" type="button" onClick={handleUploadClick} disabled={!isAuthReady || isParsing}>
           <span className="file-icon" aria-hidden="true">
             +
           </span>
           <span>{isParsing ? "Reading ZIP locally..." : "Choose WhatsApp export ZIP"}</span>
-        </label>
+        </button>
 
         {error ? <p className="error-message">{error}</p> : null}
 
@@ -206,9 +337,9 @@ function App() {
           </>
         ) : (
           <div className="privacy-note">
-            <strong>No upload, no cloud processing.</strong>
+            <strong>Login required, chat stays local.</strong>
             <span>
-              The ZIP is read by your browser on this device. Imported messages and media are kept in memory only.
+              messages and media are kept in memory only.
             </span>
           </div>
         )}
@@ -263,7 +394,121 @@ function App() {
         <DetailedStats chat={chat} stats={chatStats} visibleCount={visibleMessages.length} />
       </aside>
       </main>
+      {isAuthModalOpen ? (
+        <AuthModal
+          mode={authMode}
+          username={authUsername}
+          password={authPassword}
+          error={authError}
+          isSubmitting={isAuthenticating}
+          isLocked={isAuthLocked}
+          lockoutSeconds={lockoutSeconds}
+          onModeChange={(mode) => {
+            setAuthMode(mode);
+            setAuthError("");
+          }}
+          onUsernameChange={setAuthUsername}
+          onPasswordChange={setAuthPassword}
+          onClose={() => {
+            if (!isAuthenticating) setIsAuthModalOpen(false);
+          }}
+          onSubmit={handleAuthSubmit}
+        />
+      ) : null}
     </>
+  );
+}
+
+function AuthModal({
+  mode,
+  username,
+  password,
+  error,
+  isSubmitting,
+  isLocked,
+  lockoutSeconds,
+  onModeChange,
+  onUsernameChange,
+  onPasswordChange,
+  onClose,
+  onSubmit,
+}: {
+  mode: AuthMode;
+  username: string;
+  password: string;
+  error: string;
+  isSubmitting: boolean;
+  isLocked: boolean;
+  lockoutSeconds: number;
+  onModeChange: (mode: AuthMode) => void;
+  onUsernameChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const title = mode === "login" ? "Login to upload" : "Create account";
+  const submitText = mode === "login" ? "Login" : "Register";
+
+  return (
+    <div className="auth-backdrop" role="presentation">
+      <form className="auth-modal" onSubmit={onSubmit} aria-label={title}>
+        <div className="auth-modal-header">
+          <div>
+            <p className="eyebrow">Account required</p>
+            <h2>{title}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close login popup" disabled={isSubmitting}>
+            x
+          </button>
+        </div>
+
+        <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => onModeChange("login")}>
+            Login
+          </button>
+          <button
+            type="button"
+            className={mode === "register" ? "active" : ""}
+            onClick={() => onModeChange("register")}
+          >
+            Register
+          </button>
+        </div>
+
+        <label className="field">
+          <span>Username</span>
+          <input
+            autoFocus
+            type="text"
+            autoComplete="username"
+            value={username}
+            onChange={(event) => onUsernameChange(event.target.value)}
+            placeholder="your-name"
+          />
+        </label>
+
+        <label className="field">
+          <span>Password</span>
+          <input
+            type="password"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            value={password}
+            onChange={(event) => onPasswordChange(event.target.value)}
+            placeholder="At least 8 characters"
+          />
+        </label>
+
+        {error ? <p className="error-message">{error}</p> : null}
+        {isLocked ? <p className="auth-hint">Too many failed attempts. Try again in {lockoutSeconds} seconds.</p> : null}
+
+        <button className="auth-submit" type="submit" disabled={isSubmitting || isLocked}>
+          {isSubmitting ? "Checking..." : submitText}
+        </button>
+
+        <p className="auth-hint">
+        </p>
+      </form>
+    </div>
   );
 }
 
@@ -714,6 +959,37 @@ function formatDuration(milliseconds: number | null): string {
   if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
   if (seconds > 0) return `${seconds}s`;
   return `${minutes}m`;
+}
+
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function validateCredentials(username: string, password: string): string {
+  if (!/^[a-z0-9][a-z0-9._-]{2,30}$/.test(username)) {
+    return "Use 3-31 lowercase letters, numbers, dots, underscores, or hyphens.";
+  }
+
+  if (password.length < 8) {
+    return "Use a password with at least 8 characters.";
+  }
+
+  return "";
+}
+
+function usernameToAuthEmail(username: string): string {
+  return `${username}@${authEmailDomain}`;
+}
+
+function getDisplayUsername(user: User | null): string {
+  if (!user) return "";
+
+  const metadataUsername = user.user_metadata?.username;
+  if (typeof metadataUsername === "string" && metadataUsername.trim()) {
+    return metadataUsername;
+  }
+
+  return user.email?.split("@")[0] ?? "user";
 }
 
 export default App;

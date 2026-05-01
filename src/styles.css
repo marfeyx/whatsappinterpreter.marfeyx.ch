@@ -24,6 +24,11 @@ select {
   font: inherit;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .mobile-disabled {
   display: none;
 }
@@ -84,6 +89,7 @@ h1 {
   font-weight: 750;
 }
 
+.hidden-file-input,
 .file-drop input {
   position: absolute;
   inline-size: 1px;
@@ -109,6 +115,39 @@ h1 {
   color: #7a1f1f;
   background: #ffe7e5;
   font-weight: 650;
+}
+
+.auth-status {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 48, 42, 0.1);
+  border-radius: 8px;
+  color: #344640;
+  background: #ffffff;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.auth-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-status button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(31, 48, 42, 0.14);
+  border-radius: 8px;
+  color: #25352f;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 750;
 }
 
 .summary-grid {
@@ -883,6 +922,81 @@ h1 {
   font-size: 0.7rem;
   font-weight: 850;
   text-transform: uppercase;
+}
+
+.auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(12, 18, 16, 0.42);
+}
+
+.auth-modal {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid rgba(31, 48, 42, 0.14);
+  border-radius: 8px;
+  color: #17211d;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(20, 24, 23, 0.28);
+}
+
+.auth-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-modal-header h2 {
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.auth-modal-header button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(31, 48, 42, 0.12);
+  border-radius: 8px;
+  color: #25352f;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-tabs button,
+.auth-submit {
+  min-height: 42px;
+  border: 1px solid rgba(31, 48, 42, 0.14);
+  border-radius: 8px;
+  color: #25352f;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.auth-tabs button.active,
+.auth-submit {
+  border-color: #0a8f68;
+  color: #ffffff;
+  background: #0a8f68;
+}
+
+.auth-hint {
+  color: #53625d;
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 @media (max-width: 820px) {
