@@ -397,7 +397,7 @@ function App() {
         <footer className="site-footer">
           <div className="footer-links">
             <a href="privacy.html">Privacy Policy</a>
-            <a href="mailto:contact.marfeyx@marfeyx.ch?subject=WhatsApp%20Backup%20Interpreter%20Issue">Report issues</a>
+            <a href="mailto:contact.marfeyx@gmail.com?subject=WhatsApp%20Backup%20Interpreter%20Issue">Report issues</a>
           </div>
 
           <div className="footer-account" aria-label="Account state">
@@ -413,7 +413,7 @@ function App() {
                   </button>
                   <a
                     className="footer-account-button danger"
-                    href={`mailto:contact.marfeyx@marfeyx.ch?subject=Delete%20account%20request&body=${encodeURIComponent(
+                    href={`mailto:contact.marfeyx@gmail.com?subject=Delete%20account%20request&body=${encodeURIComponent(
                       `Please delete my WhatsApp Backup Interpreter account.\n\nAccount: ${authUser.email ?? getDisplayUsername(authUser)}`,
                     )}`}
                   >
