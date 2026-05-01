@@ -39,9 +39,10 @@ const filters: Array<{ id: MessageFilter; label: string }> = [
 ];
 
 const maxResponseGapMs = 16 * 60 * 60 * 1000;
-const authEmailDomain = "whatsappinterpreter.local";
 const maxAuthAttempts = 5;
 const authLockoutMs = 60 * 1000;
+const maxAuthSubmissions = 5;
+const authRateLimitWindowMs = 60 * 1000;
 
 function App() {
   const [chat, setChat] = useState<ParsedChat | null>(null);
@@ -56,18 +57,30 @@ function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [authUsername, setAuthUsername] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [accountActionError, setAccountActionError] = useState("");
   const [authFailures, setAuthFailures] = useState(0);
   const [authLockedUntil, setAuthLockedUntil] = useState<number | null>(null);
+  const [authRateLimitedUntil, setAuthRateLimitedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousChat = useRef<ParsedChat | null>(null);
+  const authSubmissionTimes = useRef<number[]>([]);
 
   const isAuthLocked = Boolean(authLockedUntil && authLockedUntil > now);
+  const isAuthRateLimited = Boolean(authRateLimitedUntil && authRateLimitedUntil > now);
+  const isAuthBlocked = isAuthLocked || isAuthRateLimited;
   const lockoutSeconds = authLockedUntil ? Math.max(0, Math.ceil((authLockedUntil - now) / 1000)) : 0;
+  const rateLimitSeconds = authRateLimitedUntil ? Math.max(0, Math.ceil((authRateLimitedUntil - now) / 1000)) : 0;
+  const authBlockSeconds = Math.max(lockoutSeconds, rateLimitSeconds);
+  const authBlockMessage = isAuthLocked
+    ? `Too many failed attempts. Try again in ${lockoutSeconds} seconds.`
+    : isAuthRateLimited
+      ? `Too many login attempts. Try again in ${rateLimitSeconds} seconds.`
+      : "";
   const displayUsername = getDisplayUsername(authUser);
 
   useEffect(() => {
@@ -95,11 +108,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthLocked) return;
+    if (!isAuthBlocked) return;
 
     const intervalId = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(intervalId);
-  }, [isAuthLocked]);
+  }, [isAuthBlocked]);
 
   useEffect(() => {
     previousChat.current = chat;
@@ -188,46 +201,91 @@ function App() {
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (isAuthLocked) {
-      setAuthError(`Too many failed attempts. Try again in ${lockoutSeconds} seconds.`);
+    if (isAuthBlocked) {
+      setAuthError(authBlockMessage);
       return;
     }
 
-    const normalizedUsername = normalizeUsername(authUsername);
-    const validationError = validateCredentials(normalizedUsername, authPassword);
+    const email = normalizeEmail(authEmail);
+    const validationError = validateCredentials(email, authPassword);
     if (validationError) {
       setAuthError(validationError);
+      return;
+    }
+
+    const rateLimitError = registerAuthSubmission();
+    if (rateLimitError) {
+      setAuthError(rateLimitError);
       return;
     }
 
     setIsAuthenticating(true);
     setAuthError("");
 
-    const email = usernameToAuthEmail(normalizedUsername);
-    const result =
-      authMode === "login"
-            email,
-            password: authPassword,
-            options: { data: { username: normalizedUsername } },
-          });
+    try {
+      const result =
+        authMode === "login"
+              email,
+              password: authPassword,
+              options: { data: { username: getEmailUsername(email) } },
+            });
 
-    setIsAuthenticating(false);
+      if (result.error) {
+        if (shouldCountAuthFailure(result.error, authMode)) {
+          registerAuthFailure();
+        }
 
-    if (result.error) {
-      registerAuthFailure();
-      setAuthError("The username or password was not accepted.");
-      return;
+        setAuthError(getAuthErrorMessage(result.error, authMode));
+        return;
+      }
+
+      setAuthFailures(0);
+      setAuthLockedUntil(null);
+      setAuthPassword("");
+      setIsAuthModalOpen(false);
+
+      if (authMode === "register" && !result.data.session) {
+        setAuthError("Check your email to confirm your account before signing in.");
+        setAuthMode("login");
+        setIsAuthModalOpen(true);
+        return;
+      }
+
+      window.setTimeout(() => fileInputRef.current?.click(), 0);
+    } catch {
+    } finally {
+      setIsAuthenticating(false);
     }
-
-    setAuthFailures(0);
-    setAuthLockedUntil(null);
-    setAuthPassword("");
-    setIsAuthModalOpen(false);
-    window.setTimeout(() => fileInputRef.current?.click(), 0);
   }
 
   async function handleLogout() {
     setAuthUser(null);
+  }
+
+  async function handleChangeAccount() {
+    setAuthUser(null);
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthMode("login");
+    setAuthError("");
+    setAccountActionError("");
+    setIsAuthModalOpen(true);
+  }
+
+  function registerAuthSubmission(): string {
+    const timestamp = Date.now();
+    const windowStart = timestamp - authRateLimitWindowMs;
+    authSubmissionTimes.current = authSubmissionTimes.current.filter((attemptedAt) => attemptedAt > windowStart);
+
+    if (authSubmissionTimes.current.length >= maxAuthSubmissions) {
+      const retryAt = authSubmissionTimes.current[0] + authRateLimitWindowMs;
+      setAuthRateLimitedUntil(retryAt);
+      setNow(timestamp);
+      return `Too many login attempts. Try again in ${Math.ceil((retryAt - timestamp) / 1000)} seconds.`;
+    }
+
+    authSubmissionTimes.current.push(timestamp);
+    return "";
   }
 
   function registerAuthFailure() {
@@ -343,13 +401,49 @@ function App() {
             </span>
           </div>
         )}
-        <a
-          className="issue-link"
-          href="mailto:contact.marfeyx@gmail.com?subject=WhatsApp%20Backup%20Interpreter%20Issue"
-        >
-          <span>Report issues</span>
-          <strong>contact.marfeyx@gmail.com</strong>
-        </a>
+        <footer className="site-footer">
+          <div className="footer-links">
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="mailto:contact.marfeyx@marfeyx.ch?subject=WhatsApp%20Backup%20Interpreter%20Issue">Report issues</a>
+          </div>
+
+          <div className="footer-account" aria-label="Account state">
+            <span>{authUser ? `Signed in as ${formatAccountLabel(authUser)}` : "Not signed in"}</span>
+            <div className="footer-account-actions">
+              {authUser ? (
+                <>
+                  <button type="button" onClick={handleLogout}>
+                    Sign out
+                  </button>
+                  <button type="button" onClick={handleChangeAccount}>
+                    Change account
+                  </button>
+                  <a
+                    className="footer-account-button danger"
+                    href={`mailto:contact.marfeyx@marfeyx.ch?subject=Delete%20account%20request&body=${encodeURIComponent(
+                      `Please delete my WhatsApp Backup Interpreter account.\n\nAccount: ${formatAccountLabel(authUser)}`,
+                    )}`}
+                  >
+                    Delete account request
+                  </a>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError("");
+                    setAccountActionError("");
+                    setIsAuthModalOpen(true);
+                  }}
+                >
+                  Login
+                </button>
+              )}
+            </div>
+            {accountActionError ? <p className="footer-account-error">{accountActionError}</p> : null}
+          </div>
+        </footer>
       </section>
 
       <section className="phone-stage" aria-label="WhatsApp-style preview">
@@ -397,17 +491,18 @@ function App() {
       {isAuthModalOpen ? (
         <AuthModal
           mode={authMode}
-          username={authUsername}
+          email={authEmail}
           password={authPassword}
           error={authError}
           isSubmitting={isAuthenticating}
-          isLocked={isAuthLocked}
-          lockoutSeconds={lockoutSeconds}
+          isLocked={isAuthBlocked}
+          lockoutSeconds={authBlockSeconds}
+          lockedMessage={authBlockMessage}
           onModeChange={(mode) => {
             setAuthMode(mode);
             setAuthError("");
           }}
-          onUsernameChange={setAuthUsername}
+          onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
           onClose={() => {
             if (!isAuthenticating) setIsAuthModalOpen(false);
@@ -421,27 +516,29 @@ function App() {
 
 function AuthModal({
   mode,
-  username,
+  email,
   password,
   error,
   isSubmitting,
   isLocked,
   lockoutSeconds,
+  lockedMessage,
   onModeChange,
-  onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onClose,
   onSubmit,
 }: {
   mode: AuthMode;
-  username: string;
+  email: string;
   password: string;
   error: string;
   isSubmitting: boolean;
   isLocked: boolean;
   lockoutSeconds: number;
+  lockedMessage: string;
   onModeChange: (mode: AuthMode) => void;
-  onUsernameChange: (value: string) => void;
+  onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -476,14 +573,14 @@ function AuthModal({
         </div>
 
         <label className="field">
-          <span>Username</span>
+          <span>Email</span>
           <input
             autoFocus
-            type="text"
-            autoComplete="username"
-            value={username}
-            onChange={(event) => onUsernameChange(event.target.value)}
-            placeholder="your-name"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(event) => onEmailChange(event.target.value)}
+            placeholder="you@example.com"
           />
         </label>
 
@@ -499,7 +596,7 @@ function AuthModal({
         </label>
 
         {error ? <p className="error-message">{error}</p> : null}
-        {isLocked ? <p className="auth-hint">Too many failed attempts. Try again in {lockoutSeconds} seconds.</p> : null}
+        {isLocked ? <p className="auth-hint">{lockedMessage || `Try again in ${lockoutSeconds} seconds.`}</p> : null}
 
         <button className="auth-submit" type="submit" disabled={isSubmitting || isLocked}>
           {isSubmitting ? "Checking..." : submitText}
@@ -961,13 +1058,72 @@ function formatDuration(milliseconds: number | null): string {
   return `${minutes}m`;
 }
 
-function normalizeUsername(username: string): string {
-  return username.trim().toLowerCase();
+function getAuthErrorMessage(error: AuthError, mode: AuthMode): string {
+  const code = getAuthErrorCode(error);
+  const message = error.message.toLowerCase();
+
+  if (code === "invalid_credentials" || message.includes("invalid login credentials")) {
+    return "The email or password is incorrect.";
+  }
+
+  if (code === "email_not_confirmed" || message.includes("email not confirmed")) {
+    return "Confirm your email address before signing in.";
+  }
+
+  if (code === "user_already_exists" || message.includes("already registered") || message.includes("already exists")) {
+    return "An account already exists for this email. Login instead.";
+  }
+
+  if (code === "weak_password" || message.includes("weak password")) {
+    return "Use a stronger password.";
+  }
+
+  if (code === "signup_disabled" || message.includes("signups not allowed") || message.includes("signup disabled")) {
+    return "New account registration is currently disabled.";
+  }
+
+  if (code === "email_address_invalid" || message.includes("invalid email")) {
+    return "Enter a valid email address.";
+  }
+
+  if (code === "over_email_send_rate_limit") {
+    return "Too many confirmation emails were requested. Wait a moment and try again.";
+  }
+
+  if (code === "over_request_rate_limit" || error.status === 429) {
+    return "Too many requests. Wait a moment and try again.";
+  }
+
+  if (code === "user_banned") {
+    return "This account is disabled. Contact support if this seems wrong.";
+  }
+
+  if (error.status && error.status >= 500) {
+  }
+
+  return mode === "login" ? "Login failed. Check your email and password." : "Registration failed. Check your details.";
 }
 
-function validateCredentials(username: string, password: string): string {
-  if (!/^[a-z0-9][a-z0-9._-]{2,30}$/.test(username)) {
-    return "Use 3-31 lowercase letters, numbers, dots, underscores, or hyphens.";
+function shouldCountAuthFailure(error: AuthError, mode: AuthMode): boolean {
+  if (mode !== "login") return false;
+
+  const code = getAuthErrorCode(error);
+  const message = error.message.toLowerCase();
+  return code === "invalid_credentials" || message.includes("invalid login credentials");
+}
+
+function getAuthErrorCode(error: AuthError): string {
+  const code = "code" in error ? error.code : undefined;
+  return typeof code === "string" ? code : "";
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function validateCredentials(email: string, password: string): string {
+  if (!/^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(email)) {
+    return "Enter a valid email address.";
   }
 
   if (password.length < 8) {
@@ -977,8 +1133,8 @@ function validateCredentials(username: string, password: string): string {
   return "";
 }
 
-function usernameToAuthEmail(username: string): string {
-  return `${username}@${authEmailDomain}`;
+function getEmailUsername(email: string): string {
+  return email.split("@")[0] || "user";
 }
 
 function getDisplayUsername(user: User | null): string {
@@ -990,6 +1146,11 @@ function getDisplayUsername(user: User | null): string {
   }
 
   return user.email?.split("@")[0] ?? "user";
+}
+
+function formatAccountLabel(user: User): string {
+  const username = getDisplayUsername(user);
+  return user.email ? `${username} (${user.email})` : username;
 }
 
 export default App;
