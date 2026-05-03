@@ -1,237 +1,129 @@
-import JSZip from "jszip";
-import type { Attachment, AttachmentKind, ChatMessage, ParsedChat } from "./types";
+import type { Attachment, LoadedAttachmentUrl, ParsedChat } from "./types";
 
-const textExtensions = new Set([".txt"]);
-const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".bmp"]);
-const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".3gp", ".avi", ".webm"]);
-const audioExtensions = new Set([".opus", ".ogg", ".mp3", ".m4a", ".aac", ".wav", ".amr"]);
+type ParseResult = {
+  type: "parse-result";
+  id: number;
+  chat: ParsedChat;
+};
 
-const messagePatterns = [
-  /^\[(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?\]\s([^:]+?):\s([\s\S]*)$/i,
-  /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?\s-\s([^:]+?):\s([\s\S]*)$/i,
-];
+type AttachmentResult = {
+  type: "attachment-result";
+  id: number;
+  archiveId: number;
+  path: string;
+  blob: Blob;
+  size: number;
+};
 
-const systemPatterns = [
-  /^\[(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?\]\s([\s\S]*)$/i,
-  /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?\s-\s([\s\S]*)$/i,
-];
+type ClearResult = {
+  type: "clear-result";
+  id: number;
+};
+
+type WorkerError = {
+  type: "error";
+  id: number;
+  message: string;
+};
+
+type WorkerResponse = ParseResult | AttachmentResult | ClearResult | WorkerError;
+
+type PendingRequest<T> = {
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+};
+
+let worker: Worker | null = null;
+let nextRequestId = 1;
+const pendingRequests = new Map<number, PendingRequest<unknown>>();
 
 export async function parseWhatsAppZip(file: File): Promise<ParsedChat> {
-  const zip = await JSZip.loadAsync(file);
-  const files = Object.values(zip.files).filter((entry) => !entry.dir);
-  const textFile = pickChatTextFile(files.map((entry) => entry.name));
+  const result = await sendWorkerRequest<ParseResult>((id) => ({
+    type: "parse",
+    id,
+    file,
+  }));
+  return result.chat;
+}
 
-  if (!textFile) {
-    throw new Error("No WhatsApp chat .txt file was found in this ZIP.");
-  }
-
-  const mediaEntries = files.filter((entry) => !textExtensions.has(getExtension(entry.name)));
-  const attachments = await Promise.all(
-    mediaEntries.map(async (entry) => {
-      const blob = await entry.async("blob");
-      const mime = getMimeType(entry.name, blob.type);
-      return {
-        name: getBaseName(entry.name),
-        path: entry.name,
-        url: URL.createObjectURL(new Blob([blob], { type: mime })),
-        mime,
-        kind: getAttachmentKind(entry.name, mime),
-        size: blob.size,
-      } satisfies Attachment;
-    }),
-  );
-
-  const text = await zip.file(textFile)!.async("string");
-  const messages = parseChatText(text, attachments);
-  const participants = Array.from(
-    new Set(messages.map((message) => message.sender).filter((sender): sender is string => Boolean(sender))),
-  ).sort((a, b) => a.localeCompare(b));
+export async function loadAttachmentUrl(attachment: Attachment): Promise<LoadedAttachmentUrl> {
+  const result = await sendWorkerRequest<AttachmentResult>((id) => ({
+    type: "load-attachment",
+    id,
+    archiveId: attachment.archiveId,
+    path: attachment.path,
+  }));
+  const blob = result.blob.type === attachment.mime ? result.blob : result.blob.slice(0, result.blob.size, attachment.mime);
 
   return {
-    sourceName: file.name,
-    messages,
-    participants,
-    attachments,
+    url: URL.createObjectURL(blob),
+    size: result.size || attachment.size,
   };
 }
 
-export function parseChatText(text: string, attachments: Attachment[]): ChatMessage[] {
-  const byName = new Map(attachments.map((attachment) => [attachment.name.toLowerCase(), attachment]));
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = normalized.split("\n");
-  const messages: ChatMessage[] = [];
+export function clearZipParser() {
+  if (!worker) return;
 
-  for (const line of lines) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    const parsed = parseLineStart(line);
-    if (parsed) {
-      messages.push({
-        id: `m-${messages.length}`,
-        timestamp: parsed.timestamp,
-        sender: parsed.sender,
-        text: parsed.text,
-        isSystem: !parsed.sender,
-        attachments: [],
-      });
-      continue;
-    }
-
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage) {
-      lastMessage.text = `${lastMessage.text}\n${line}`;
-    }
-  }
-
-  for (const message of messages) {
-    message.attachments = findAttachments(message.text, byName);
-  }
-
-  return messages;
+  void sendWorkerRequest<ClearResult>((id) => ({
+    type: "clear",
+    id,
+  })).catch(() => undefined);
 }
 
-function pickChatTextFile(paths: string[]): string | null {
-  const textFiles = paths.filter((path) => textExtensions.has(getExtension(path)));
-  return (
-    textFiles.find((path) => getBaseName(path).toLowerCase() === "_chat.txt") ??
-    textFiles.find((path) => /chat/i.test(getBaseName(path))) ??
-    textFiles[0] ??
-    null
-  );
+export function terminateZipParser() {
+  if (!worker) return;
+
+  worker.terminate();
+  worker = null;
+
+  for (const request of pendingRequests.values()) {
+    request.reject(new Error("ZIP parsing was cancelled."));
+  }
+  pendingRequests.clear();
 }
 
-function parseLineStart(line: string): { timestamp: Date | null; sender: string | null; text: string } | null {
-  const cleanedLine = cleanInvisible(line).trimStart();
+function sendWorkerRequest<T>(createMessage: (id: number) => object): Promise<T> {
+  const activeWorker = getWorker();
+  const id = nextRequestId++;
 
-  for (const pattern of messagePatterns) {
-    const match = cleanedLine.match(pattern);
-    if (match) {
-      return {
-        timestamp: buildDate(match[1], match[2], match[3], match[4], match[5], match[6], match[7]),
-        sender: cleanInvisible(match[8]).trim(),
-        text: cleanInvisible(match[9]).trim(),
-      };
+  return new Promise<T>((resolve, reject) => {
+    pendingRequests.set(id, {
+      resolve: resolve as (value: unknown) => void,
+      reject,
+    });
+
+    activeWorker.postMessage(createMessage(id));
+  });
+}
+
+function getWorker(): Worker {
+  if (worker) return worker;
+
+  worker = new Worker(new URL("./zipParser.worker.ts", import.meta.url), { type: "module" });
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = (event) => {
+    const error = new Error(event.message || "The ZIP worker crashed.");
+    for (const request of pendingRequests.values()) {
+      request.reject(error);
     }
-  }
-
-  for (const pattern of systemPatterns) {
-    const match = cleanedLine.match(pattern);
-    if (match) {
-      return {
-        timestamp: buildDate(match[1], match[2], match[3], match[4], match[5], match[6], match[7]),
-        sender: null,
-        text: cleanInvisible(match[8]).trim(),
-      };
-    }
-  }
-
-  return null;
-}
-
-function buildDate(
-  dayText: string,
-  monthText: string,
-  yearText: string,
-  hourText: string,
-  minuteText: string,
-  secondText = "0",
-  meridiem?: string,
-): Date | null {
-  let year = Number(yearText);
-  let hour = Number(hourText);
-
-  if (year < 100) {
-    year += year >= 70 ? 1900 : 2000;
-  }
-
-  if (meridiem) {
-    const upper = meridiem.toUpperCase();
-    if (upper === "PM" && hour < 12) hour += 12;
-    if (upper === "AM" && hour === 12) hour = 0;
-  }
-
-  const date = new Date(
-    year,
-    Number(monthText) - 1,
-    Number(dayText),
-    hour,
-    Number(minuteText),
-    Number(secondText || "0"),
-  );
-
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function findAttachments(text: string, byName: Map<string, Attachment>): Attachment[] {
-  const matches = new Map<string, Attachment>();
-  const lowerText = text.toLowerCase();
-
-  for (const [name, attachment] of byName) {
-    if (lowerText.includes(name)) {
-      matches.set(attachment.path, attachment);
-    }
-  }
-
-  const explicit = text.match(/<attached:\s*([^>]+)>/gi) ?? [];
-  for (const token of explicit) {
-    const name = token.replace(/<attached:\s*/i, "").replace(/>$/, "").trim().toLowerCase();
-    const attachment = byName.get(name);
-    if (attachment) {
-      matches.set(attachment.path, attachment);
-    }
-  }
-
-  return Array.from(matches.values());
-}
-
-function getAttachmentKind(path: string, mime: string): AttachmentKind {
-  const extension = getExtension(path);
-  if (mime.startsWith("image/") || imageExtensions.has(extension)) return "image";
-  if (mime.startsWith("video/") || videoExtensions.has(extension)) return "video";
-  if (mime.startsWith("audio/") || audioExtensions.has(extension)) return "audio";
-  if (extension) return "document";
-  return "unknown";
-}
-
-function getMimeType(path: string, fallback: string): string {
-  const extension = getExtension(path);
-  const known: Record<string, string> = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".heic": "image/heic",
-    ".bmp": "image/bmp",
-    ".mp4": "video/mp4",
-    ".mov": "video/quicktime",
-    ".m4v": "video/mp4",
-    ".3gp": "video/3gpp",
-    ".webm": "video/webm",
-    ".opus": "audio/ogg",
-    ".ogg": "audio/ogg",
-    ".mp3": "audio/mpeg",
-    ".m4a": "audio/mp4",
-    ".aac": "audio/aac",
-    ".wav": "audio/wav",
-    ".amr": "audio/amr",
-    ".pdf": "application/pdf",
+    pendingRequests.clear();
+    terminateZipParser();
   };
-  return known[extension] ?? fallback ?? "application/octet-stream";
+
+  return worker;
 }
 
-function getExtension(path: string): string {
-  const name = getBaseName(path);
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
-}
+function handleWorkerMessage(event: MessageEvent<WorkerResponse>) {
+  const response = event.data;
+  const request = pendingRequests.get(response.id);
+  if (!request) return;
 
-function getBaseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
+  pendingRequests.delete(response.id);
 
-function cleanInvisible(value: string): string {
-  return value.replace(/[\u200e\u200f\u202a-\u202e]/g, "");
+  if (response.type === "error") {
+    request.reject(new Error(response.message));
+    return;
+  }
+
+  request.resolve(response);
 }

@@ -707,6 +707,26 @@ h1 {
   background-size: 44px 28px, 44px 28px, 36px 36px;
 }
 
+.timeline-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 72px;
+}
+
+.load-more-messages {
+  width: fit-content;
+  max-width: 88%;
+  display: block;
+  margin: 12px auto 4px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #0a8f68;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .day-separator,
 .system-message {
   width: fit-content;
@@ -859,6 +879,32 @@ h1 {
 .attachment-video {
   min-height: 160px;
   background: #111b16;
+}
+
+.attachment-placeholder {
+  min-width: 220px;
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 13px;
+  color: #60716b;
+  background: rgba(255, 255, 255, 0.58);
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+.attachment-placeholder button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(31, 48, 42, 0.14);
+  border-radius: 8px;
+  color: #25352f;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
 }
 
 .attachment-card {

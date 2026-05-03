@@ -1,6 +1,6 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { parseWhatsAppZip } from "./parser";
-import type { Attachment, ChatMessage, MessageFilter, ParsedChat } from "./types";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadAttachmentUrl, parseWhatsAppZip, terminateZipParser } from "./parser";
+import type { Attachment, ChatMessage, LoadedAttachmentUrl, MessageFilter, ParsedChat } from "./types";
 
 type ParticipantStats = {
   name: string;
@@ -43,6 +43,8 @@ const maxAuthAttempts = 5;
 const authLockoutMs = 60 * 1000;
 const maxAuthSubmissions = 5;
 const authRateLimitWindowMs = 60 * 1000;
+const initialTimelineRenderCount = 700;
+const timelineRenderBatchSize = 700;
 
 function App() {
   const [chat, setChat] = useState<ParsedChat | null>(null);
@@ -67,9 +69,12 @@ function App() {
   const [authLockedUntil, setAuthLockedUntil] = useState<number | null>(null);
   const [authRateLimitedUntil, setAuthRateLimitedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, LoadedAttachmentUrl>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const previousChat = useRef<ParsedChat | null>(null);
   const authSubmissionTimes = useRef<number[]>([]);
+  const attachmentUrlsRef = useRef<Record<string, LoadedAttachmentUrl>>({});
+  const pendingAttachmentLoads = useRef(new Map<string, Promise<LoadedAttachmentUrl | null>>());
+  const activeArchiveId = useRef<number | null>(null);
 
   const isAuthLocked = Boolean(authLockedUntil && authLockedUntil > now);
   const isAuthRateLimited = Boolean(authRateLimitedUntil && authRateLimitedUntil > now);
@@ -84,7 +89,10 @@ function App() {
       : "";
 
   useEffect(() => {
-    return () => revokeAttachmentUrls(previousChat.current);
+    return () => {
+      revokeLoadedAttachmentUrls(attachmentUrlsRef.current);
+      terminateZipParser();
+    };
   }, []);
 
   useEffect(() => {
@@ -115,8 +123,12 @@ function App() {
   }, [isAuthBlocked]);
 
   useEffect(() => {
-    previousChat.current = chat;
+    activeArchiveId.current = chat?.archiveId ?? null;
   }, [chat]);
+
+  useEffect(() => {
+    attachmentUrlsRef.current = attachmentUrls;
+  }, [attachmentUrls]);
 
   useEffect(() => {
     return () => {
@@ -128,9 +140,9 @@ function App() {
     if (!chat) return [];
     const search = query.trim().toLowerCase();
     return chat.messages.filter((message) => {
-      if (isHiddenWhatsAppNotice(message)) return false;
+      if (message.isHiddenNotice) return false;
       if (!matchesFilter(message, filter)) return false;
-      if (dateQuery && formatDateInputValue(message.timestamp) !== dateQuery) return false;
+      if (dateQuery && message.dateKey !== dateQuery) return false;
       if (!search) return true;
       return (
         message.text.toLowerCase().includes(search) ||
@@ -143,6 +155,45 @@ function App() {
   const chatStats = useMemo(() => (chat ? getChatStats(chat) : null), [chat]);
 
   const importedAt = useMemo(() => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), [chat]);
+
+  const ensureAttachmentUrl = useCallback((attachment: Attachment): Promise<LoadedAttachmentUrl | null> => {
+    const cached = attachmentUrlsRef.current[attachment.path];
+    if (cached) return Promise.resolve(cached);
+
+    const pending = pendingAttachmentLoads.current.get(attachment.path);
+    if (pending) return pending;
+
+    const archiveId = attachment.archiveId;
+    const promise = loadAttachmentUrl(attachment)
+      .then((loaded) => {
+        pendingAttachmentLoads.current.delete(attachment.path);
+
+        if (activeArchiveId.current !== archiveId) {
+          URL.revokeObjectURL(loaded.url);
+          return null;
+        }
+
+        setAttachmentUrls((current) => {
+          if (current[attachment.path]) {
+            URL.revokeObjectURL(loaded.url);
+            return current;
+          }
+
+          const next = { ...current, [attachment.path]: loaded };
+          attachmentUrlsRef.current = next;
+          return next;
+        });
+
+        return loaded;
+      })
+      .catch((caught) => {
+        pendingAttachmentLoads.current.delete(attachment.path);
+        throw caught;
+      });
+
+    pendingAttachmentLoads.current.set(attachment.path, promise);
+    return promise;
+  }, []);
 
   function handleUploadClick() {
     setError("");
@@ -165,7 +216,8 @@ function App() {
 
     try {
       const parsed = await parseWhatsAppZip(file);
-      revokeAttachmentUrls(chat);
+      activeArchiveId.current = parsed.archiveId;
+      clearLoadedAttachmentUrls();
       setChat(parsed);
       setMyName(parsed.participants[0] ?? "");
       setFilter("all");
@@ -188,7 +240,9 @@ function App() {
   }
 
   function clearChat() {
-    revokeAttachmentUrls(chat);
+    clearLoadedAttachmentUrls();
+    activeArchiveId.current = null;
+    terminateZipParser();
     setChat(null);
     setMyName("");
     setQuery("");
@@ -196,6 +250,13 @@ function App() {
     setFilter("all");
     setError("");
     setProfilePictureUrl("");
+  }
+
+  function clearLoadedAttachmentUrls() {
+    revokeLoadedAttachmentUrls(attachmentUrlsRef.current);
+    attachmentUrlsRef.current = {};
+    pendingAttachmentLoads.current.clear();
+    setAttachmentUrls({});
   }
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
@@ -463,7 +524,12 @@ function App() {
 
           <div className="message-list">
             {chat ? (
-              <Timeline messages={visibleMessages} myName={myName} />
+              <Timeline
+                messages={visibleMessages}
+                myName={myName}
+                attachmentUrls={attachmentUrls}
+                onLoadAttachment={ensureAttachmentUrl}
+              />
             ) : (
               <div className="empty-state">
                 <div className="empty-lock" aria-hidden="true">
@@ -765,32 +831,76 @@ function Avatar({
   );
 }
 
-function Timeline({ messages, myName }: { messages: ChatMessage[]; myName: string }) {
+function Timeline({
+  messages,
+  myName,
+  attachmentUrls,
+  onLoadAttachment,
+}: {
+  messages: ChatMessage[];
+  myName: string;
+  attachmentUrls: Record<string, LoadedAttachmentUrl>;
+  onLoadAttachment: (attachment: Attachment) => Promise<LoadedAttachmentUrl | null>;
+}) {
+  const [renderCount, setRenderCount] = useState(initialTimelineRenderCount);
   let lastDay = "";
+
+  useEffect(() => {
+    setRenderCount(initialTimelineRenderCount);
+  }, [messages]);
 
   if (!messages.length) {
     return <p className="no-results">No messages match the current view.</p>;
   }
 
+  const displayedMessages = messages.slice(0, renderCount);
+  const remainingMessages = Math.max(0, messages.length - displayedMessages.length);
+
   return (
     <>
-      {messages.map((message) => {
+      {displayedMessages.map((message) => {
         const day = formatDay(message.timestamp);
         const showDay = day !== lastDay;
         lastDay = day;
 
         return (
-          <div key={message.id}>
+          <div className="timeline-item" key={message.id}>
             {showDay ? <div className="day-separator">{day}</div> : null}
-            <MessageBubble message={message} outgoing={Boolean(message.sender && message.sender === myName)} />
+            <MessageBubble
+              message={message}
+              outgoing={Boolean(message.sender && message.sender === myName)}
+              attachmentUrls={attachmentUrls}
+              onLoadAttachment={onLoadAttachment}
+            />
           </div>
         );
       })}
+      {remainingMessages > 0 ? (
+        <button
+          className="load-more-messages"
+          type="button"
+          onClick={() =>
+            setRenderCount((current) => Math.min(current + timelineRenderBatchSize, messages.length))
+          }
+        >
+          Show next {Math.min(timelineRenderBatchSize, remainingMessages).toLocaleString()} messages
+        </button>
+      ) : null}
     </>
   );
 }
 
-function MessageBubble({ message, outgoing }: { message: ChatMessage; outgoing: boolean }) {
+function MessageBubble({
+  message,
+  outgoing,
+  attachmentUrls,
+  onLoadAttachment,
+}: {
+  message: ChatMessage;
+  outgoing: boolean;
+  attachmentUrls: Record<string, LoadedAttachmentUrl>;
+  onLoadAttachment: (attachment: Attachment) => Promise<LoadedAttachmentUrl | null>;
+}) {
   if (message.isSystem) {
     return <div className="system-message">{message.text}</div>;
   }
@@ -804,7 +914,12 @@ function MessageBubble({ message, outgoing }: { message: ChatMessage; outgoing: 
       <div className={`bubble ${isSticker ? "sticker-bubble" : ""} ${isVoice ? "voice-bubble" : ""}`}>
         {!outgoing && !isSticker ? <div className="sender-name">{message.sender}</div> : null}
         {message.attachments.map((attachment) => (
-          <AttachmentPreview attachment={attachment} key={attachment.path} />
+          <AttachmentPreview
+            attachment={attachment}
+            loadedAttachment={attachmentUrls[attachment.path]}
+            key={attachment.path}
+            onLoad={onLoadAttachment}
+          />
         ))}
         {visibleText ? <p>{visibleText}</p> : null}
         <time>{formatTime(message.timestamp)}</time>
@@ -813,13 +928,82 @@ function MessageBubble({ message, outgoing }: { message: ChatMessage; outgoing: 
   );
 }
 
-function AttachmentPreview({ attachment }: { attachment: Attachment }) {
+function AttachmentPreview({
+  attachment,
+  loadedAttachment,
+  onLoad,
+}: {
+  attachment: Attachment;
+  loadedAttachment?: LoadedAttachmentUrl;
+  onLoad: (attachment: Attachment) => Promise<LoadedAttachmentUrl | null>;
+}) {
+  const placeholderRef = useRef<HTMLDivElement | null>(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const url = loadedAttachment?.url;
+  const size = loadedAttachment?.size || attachment.size;
+
+  useEffect(() => {
+    if (url || shouldLoad) return;
+
+    const element = placeholderRef.current;
+    if (!element || !("IntersectionObserver" in window)) {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "640px 0px" },
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [shouldLoad, url]);
+
+  useEffect(() => {
+    if (!shouldLoad || url || loadError) return;
+
+    let isActive = true;
+    onLoad(attachment).catch(() => {
+      if (isActive) setLoadError("Could not load this file.");
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [attachment, loadError, onLoad, shouldLoad, url]);
+
+  if (!url) {
+    return (
+      <div className="attachment-placeholder" ref={placeholderRef}>
+        <span>{loadError || "Loading local file..."}</span>
+        {loadError ? (
+          <button
+            type="button"
+            onClick={() => {
+              setLoadError("");
+              setShouldLoad(true);
+            }}
+          >
+            Retry
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   if (attachment.kind === "image") {
-    return <img className="attachment-image" src={attachment.url} alt={attachment.name} loading="lazy" />;
+    return <img className="attachment-image" src={url} alt={attachment.name} loading="lazy" />;
   }
 
   if (attachment.kind === "video") {
-    return <video className="attachment-video" src={attachment.url} controls preload="metadata" />;
+    return <video className="attachment-video" src={url} controls preload="metadata" />;
   }
 
   if (attachment.kind === "audio") {
@@ -831,17 +1015,17 @@ function AttachmentPreview({ attachment }: { attachment: Attachment }) {
             <span key={index} />
           ))}
         </div>
-        <audio src={attachment.url} controls preload="metadata" />
+        <audio src={url} controls preload="metadata" />
       </div>
     );
   }
 
   return (
-    <a className="attachment-card" href={attachment.url} target="_blank" rel="noreferrer">
+    <a className="attachment-card" href={url} target="_blank" rel="noreferrer">
       <span className="attachment-glyph">doc</span>
       <span>
         <strong>{attachment.name}</strong>
-        <small>{formatBytes(attachment.size)}</small>
+        <small>{formatBytes(size)}</small>
       </span>
     </a>
   );
@@ -859,7 +1043,7 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
 function matchesFilter(message: ChatMessage, filter: MessageFilter): boolean {
   if (filter === "all") return true;
   if (filter === "system") return message.isSystem;
-  if (filter === "text") return !message.isSystem && Boolean(cleanMessageText(message.text));
+  if (filter === "text") return !message.isSystem && message.hasRenderableText;
   if (filter === "images") return message.attachments.some((attachment) => attachment.kind === "image");
   if (filter === "media") {
     return message.attachments.some((attachment) => attachment.kind === "image" || attachment.kind === "video" || attachment.kind === "audio");
@@ -890,18 +1074,8 @@ function isVoiceMessage(message: ChatMessage, visibleText: string): boolean {
   );
 }
 
-function isHiddenWhatsAppNotice(message: ChatMessage): boolean {
-  const normalized = normalizeText(message.text);
-  return (
-    normalized.includes("nachrichten und anrufe sind ende zu ende verschlusselt") ||
-    normalized.includes("nur personen in diesem chat konnen sie lesen anhore") ||
-    normalized.includes("messages and calls are end to end encrypted") ||
-    normalized.includes("no one outside of this chat not even whatsapp can read or listen")
-  );
-}
-
 function getChatStats(chat: ParsedChat): ChatStats {
-  const meaningfulMessages = chat.messages.filter((message) => !isHiddenWhatsAppNotice(message));
+  const meaningfulMessages = chat.messages.filter((message) => !message.isHiddenNotice);
   const participantStats = getParticipantStats(meaningfulMessages);
   const totalParticipantMessages = participantStats.reduce((sum, stat) => sum + stat.messages, 0);
   const totalParticipantWords = participantStats.reduce((sum, stat) => sum + stat.words, 0);
@@ -941,7 +1115,7 @@ function getParticipantStats(messages: ChatMessage[]): ParticipantStats[] {
       } satisfies ParticipantStats);
 
     existing.messages += 1;
-    existing.words += countWords(cleanMessageText(message.text));
+    existing.words += message.wordCount;
     existing.attachments += message.attachments.length;
     byParticipant.set(message.sender, existing);
   }
@@ -997,8 +1171,8 @@ function normalizeText(text: string): string {
     .trim();
 }
 
-function revokeAttachmentUrls(chat: ParsedChat | null) {
-  chat?.attachments.forEach((attachment) => URL.revokeObjectURL(attachment.url));
+function revokeLoadedAttachmentUrls(attachmentUrls: Record<string, LoadedAttachmentUrl>) {
+  Object.values(attachmentUrls).forEach((attachment) => URL.revokeObjectURL(attachment.url));
 }
 
 function getChatTitle(chat: ParsedChat | null, myName: string): string {
@@ -1040,15 +1214,8 @@ function formatTime(date: Date | null): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatDateInputValue(date: Date | null): string {
-  if (!date) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function formatBytes(bytes: number): string {
+  if (!bytes) return "Unknown size";
   if (bytes < 1024) return `${bytes} B`;
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
