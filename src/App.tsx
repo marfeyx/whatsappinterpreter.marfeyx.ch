@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadAttachmentUrl, parseWhatsAppZip, terminateZipParser } from "./parser";
+import { AccountProfile } from "./accountProfile";
 import type { Attachment, ChatMessage, LoadedAttachmentUrl, MessageFilter, ParsedChat } from "./types";
 
 type ParticipantStats = {
@@ -460,43 +461,25 @@ function App() {
             <a href="privacy.html">Privacy Policy</a>
             <a href="mailto:contact.marfeyx@gmail.com?subject=WhatsApp%20Backup%20Interpreter%20Issue">Report issues</a>
           </div>
+          <AccountProfile
+            className="footer-account"
+            user={authUser}
+            isAuthReady={isAuthReady}
+            onSignOut={handleLogout}
+            onChangeAccount={handleChangeAccount}
+            onLogin={() => {
+              setAuthMode("login");
+              setAuthError("");
+              setAccountActionError("");
+              setIsAuthModalOpen(true);
+            }}
+            deleteHref={`mailto:contact.marfeyx@gmail.com?subject=Delete%20account%20request&body=${encodeURIComponent(
+              `Please delete my WhatsApp Backup Interpreter account.
 
-          <div className="footer-account" aria-label="Account state">
-            <span>{authUser ? `Signed in as ${getDisplayUsername(authUser)}` : "Not signed in"}</span>
-            <div className="footer-account-actions">
-              {authUser ? (
-                <>
-                  <button type="button" onClick={handleLogout}>
-                    Sign out
-                  </button>
-                  <button type="button" onClick={handleChangeAccount}>
-                    Change account
-                  </button>
-                  <a
-                    className="footer-account-button danger"
-                    href={`mailto:contact.marfeyx@gmail.com?subject=Delete%20account%20request&body=${encodeURIComponent(
-                      `Please delete my WhatsApp Backup Interpreter account.\n\nAccount: ${authUser.email ?? getDisplayUsername(authUser)}`,
-                    )}`}
-                  >
-                    Delete account request
-                  </a>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError("");
-                    setAccountActionError("");
-                    setIsAuthModalOpen(true);
-                  }}
-                >
-                  Login
-                </button>
-              )}
-            </div>
-            {accountActionError ? <p className="footer-account-error">{accountActionError}</p> : null}
-          </div>
+Account: ${authUser?.email ?? (authUser ? getDisplayUsername(authUser) : "")}`,
+            )}`}
+          />
+          {accountActionError ? <p className="footer-account-error">{accountActionError}</p> : null}
         </footer>
       </section>
 
