@@ -1,3 +1,4 @@
+import { MarfeyxBrand } from "./brand/MarfeyxBrand";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadAttachmentUrl, parseWhatsAppZip, terminateZipParser } from "./parser";
 import type { Attachment, ChatMessage, LoadedAttachmentUrl, MessageFilter, ParsedChat } from "./types";
@@ -200,6 +201,7 @@ function App() {
       <MobileDisabled />
       <main className="app-shell">
         <section className="control-panel" aria-label="Import controls">
+          <MarfeyxBrand product="WhatsApp Interpreter" />
           <div>
             <p className="eyebrow">Local-only viewer</p>
             <h1>WhatsApp Backup Interpreter</h1>
@@ -350,11 +352,9 @@ function MobileDisabled() {
   return (
     <main className="mobile-disabled" aria-label="Mobile disabled notice">
       <div className="mobile-disabled-card">
-        <div className="mobile-disabled-mark" aria-hidden="true">
-          WA
-        </div>
+        <MarfeyxBrand product="WhatsApp Interpreter" />
         <p className="eyebrow">Desktop only</p>
-        <h1>Disabled on mobile due to performance problems</h1>
+        <h1>Open your archive on a larger screen.</h1>
         <p>
           WhatsApp ZIP exports can contain thousands of messages and media files. Open this page on a laptop or desktop
           browser for the full local viewer.

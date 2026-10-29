@@ -36,3 +36,7 @@ vite.err.log
 *.ppt
 *.pptx
 *.vcf
+
+# Shared Marfeyx font licenses are distributable project assets.
+!src/brand/DM-Sans-LICENSE.txt
+!public/brand/DM-Sans-LICENSE.txt
