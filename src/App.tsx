@@ -1,3 +1,4 @@
+import { MarfeyxImport } from "./brand/MarfeyxImport";
 import { MarfeyxBrand } from "./brand/MarfeyxBrand";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadAttachmentUrl, parseWhatsAppZip, terminateZipParser } from "./parser";
@@ -196,6 +197,8 @@ function App() {
 
 
 
+  if (!chat) return <><MobileDisabled /><MarfeyxImport product="WhatsApp Interpreter" title="Every conversation, in context." description="Return to a conversation, find a forgotten detail, or explore the media you shared. Your chat export, made readable." instruction="In WhatsApp, export a chat with media and save the ZIP. Choose that original archive here to read messages and play attachments locally." inputRef={fileInputRef} onChange={handleFileChange} onBrowse={handleUploadClick} busy={isParsing} errors={error ? [error] : []} /></>;
+
   return (
     <>
       <MobileDisabled />
@@ -204,7 +207,7 @@ function App() {
           <MarfeyxBrand product="WhatsApp Interpreter" />
           <div>
             <p className="eyebrow">Local-only viewer</p>
-            <h1>WhatsApp Backup Interpreter</h1>
+            <h1>Your conversation.</h1>
           </div>
 
         <input
@@ -221,6 +224,7 @@ function App() {
           <span>{isParsing ? "Reading ZIP locally..." : "Choose WhatsApp export ZIP"}</span>
         </button>
 
+        <button className="text-button clear-session" type="button" onClick={clearChat} disabled={isParsing}>Clear private session</button>
         {error ? <p className="error-message">{error}</p> : null}
 
         {chat ? (
